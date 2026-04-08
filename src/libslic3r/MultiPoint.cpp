@@ -1,5 +1,6 @@
 #include "MultiPoint.hpp"
 #include "BoundingBox.hpp"
+#include "Line.hpp"
 
 namespace Slic3r {
 
@@ -423,17 +424,59 @@ Points MultiPoint::concave_hull_2d(const Points& pts, const double tolerence)
 }
 
 
-void MultiPoint3::translate(double x, double y)
+void MultiPoint3::translate(const Point& vector)
 {
-    for (Vec3crd &p : points) {
-        p(0) += coord_t(x);
-        p(1) += coord_t(y);
+    for (Point3 &pt : this->points) {
+        pt(0) += vector(0);
+        pt(1) += vector(1);
     }
 }
 
-void MultiPoint3::translate(const Point& vector)
+void MultiPoint3::translate(const Point3& vector)
 {
-    this->translate(vector(0), vector(1));
+    for (Point3 &pt : this->points) {
+        pt(0) += vector(0);
+        pt(1) += vector(1);
+        pt(2) += vector(2);
+    }
+}
+
+void MultiPoint3::rotate(double cos_angle, double sin_angle)
+{
+    for (Point3 &pt : this->points) {
+        const coord_t x = pt(0);
+        const coord_t y = pt(1);
+        pt(0) = coord_t(cos_angle * x - sin_angle * y);
+        pt(1) = coord_t(sin_angle * x + cos_angle * y);
+    }
+}
+
+void MultiPoint3::rotate(double angle, const Point3 &center)
+{
+    const double cos_angle = cos(angle);
+    const double sin_angle = sin(angle);
+    for (Point3 &pt : this->points) {
+        const Vec2d v(pt(0) - center(0), pt(1) - center(1));
+        pt(0) = coord_t(center(0) + cos_angle * v(0) - sin_angle * v(1));
+        pt(1) = coord_t(center(1) + sin_angle * v(0) + cos_angle * v(1));
+    }
+}
+
+void MultiPoint3::scale(double factor)
+{
+    for (Point3 &pt : this->points) {
+        pt(0) = coord_t(pt(0) * factor);
+        pt(1) = coord_t(pt(1) * factor);
+        pt(2) = coord_t(pt(2) * factor);
+    }
+}
+
+void MultiPoint3::scale(double factor_x, double factor_y)
+{
+    for (Point3 &pt : this->points) {
+        pt(0) = coord_t(pt(0) * factor_x);
+        pt(1) = coord_t(pt(1) * factor_y);
+    }
 }
 
 double MultiPoint3::length() const
@@ -514,4 +557,87 @@ void MultiPoint::symmetric_y(const coord_t &x_axis)
     }
 }
 
+Points3 MultiPoint3::_douglas_peucker(const Points3 &pts, const double tolerance)
+{
+    Points3 result_pts;
+    double tolerance_sq = tolerance * tolerance;
+    if (!pts.empty()) {
+        const Point3 *anchor      = &pts.front();
+        size_t        anchor_idx  = 0;
+        const Point3 *floater     = &pts.back();
+        size_t        floater_idx = pts.size() - 1;
+        result_pts.reserve(pts.size());
+        result_pts.emplace_back(*anchor);
+        if (anchor_idx != floater_idx) {
+            assert(pts.size() > 1);
+            std::vector<size_t> dpStack;
+            dpStack.reserve(pts.size());
+            dpStack.emplace_back(floater_idx);
+            for (;;) {
+                double max_dist_sq  = 0.0;
+                size_t furthest_idx = anchor_idx;
+                for (size_t i = anchor_idx + 1; i < floater_idx; ++i) {
+                    double dist_sq = Line3::distance_to_squared(pts[i], *anchor, *floater);
+                    if (dist_sq > max_dist_sq) {
+                        max_dist_sq  = dist_sq;
+                        furthest_idx = i;
+                    }
+                }
+                if (max_dist_sq <= tolerance_sq) {
+                    result_pts.emplace_back(*floater);
+                    anchor_idx = floater_idx;
+                    anchor     = floater;
+                    assert(dpStack.back() == floater_idx);
+                    dpStack.pop_back();
+                    if (dpStack.empty())
+                        break;
+                    floater_idx = dpStack.back();
+                } else {
+                    floater_idx = furthest_idx;
+                    dpStack.emplace_back(floater_idx);
+                }
+                floater = &pts[floater_idx];
+            }
+        }
+        assert(result_pts.front() == pts.front());
+        assert(result_pts.back()  == pts.back());
+    }
+    return result_pts;
 }
+
+void MultiPoint3::append(const Points &points) {
+    this->points.reserve(this->points.size() + points.size());
+    for (const Point &point : points) {
+        this->points.emplace_back(point.x(), point.y(), 0);
+    }
+}
+
+int MultiPoint3::find_point(const Point &point) const 
+{
+      for (const Point3 &pt : this->points)
+        if (pt.to_point() == point)
+            return int(&pt - &this->points.front());
+    return -1;  // not found
+}
+
+int MultiPoint3::find_point(const Point &point,
+                            const double scaled_epsilon) const 
+{
+    if (scaled_epsilon == 0) return this->find_point(point);
+
+    auto dist2_min = std::numeric_limits<double>::max();
+    auto eps2      = scaled_epsilon * scaled_epsilon;
+    int  idx_min   = -1;
+    for (const Point3 &pt : this->points) {
+        double d2 = (pt.to_point() - point).cast<double>().squaredNorm();
+        if (d2 < dist2_min) {
+            idx_min   = int(&pt - &this->points.front());
+            dist2_min = d2;
+        }
+    }
+    return dist2_min < eps2 ? idx_min : -1;
+}
+Points3 MultiPoint::_douglas_peucker(const Points3 &points, const double tolerance) {
+  return MultiPoint3::_douglas_peucker(points, tolerance);
+}
+} // namespace Slic3r
