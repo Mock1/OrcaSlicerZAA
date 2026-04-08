@@ -1,11 +1,13 @@
 #ifndef slic3r_ClipperUtils_hpp_
 #define slic3r_ClipperUtils_hpp_
 
+#include "Polyline.hpp"
 #include "libslic3r.h"
 #include "clipper.hpp"
 #include "ExPolygon.hpp"
 #include "Polygon.hpp"
 #include "Surface.hpp"
+#include <boost/iterator/transform_iterator.hpp>
 
 // import these wherever we're included
 using Slic3r::ClipperLib::jtMiter;
@@ -524,6 +526,8 @@ Slic3r::Polylines  intersection_pl(const Slic3r::Polyline &subject, const Slic3r
 Slic3r::Polylines  intersection_pl(const Slic3r::Polylines &subject, const Slic3r::Polygons &clip);
 Slic3r::Polylines  intersection_pl(const Slic3r::Polylines &subject, const Slic3r::ExPolygons &clip);
 Slic3r::Polylines  intersection_pl(const Slic3r::Polygons &subject, const Slic3r::Polygons &clip);
+Slic3r::Polylines3 intersection_pl(const Slic3r::Polylines3 &subject, const Slic3r::Polygon &clip);
+Slic3r::Polylines3 intersection_pl(const Slic3r::Polylines3 &subject, const Slic3r::ExPolygon &clip);
 
 inline Slic3r::Lines intersection_ln(const Slic3r::Lines &subject, const Slic3r::Polygons &clip)
 {

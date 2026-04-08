@@ -8,6 +8,8 @@
 #include "Flow.hpp"
 #include "Geometry/ConvexHull.hpp"
 #include "I18N.hpp"
+#include "Polygon.hpp"
+#include "Polyline.hpp"
 #include "ShortestPath.hpp"
 #include "Thread.hpp"
 #include "Time.hpp"
@@ -2199,6 +2201,17 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
             }
         }
 
+        // Z-Contouring
+        for (PrintObject *obj : m_objects) {
+            bool need_contouring = need_slicing_objects.count(obj) != 0 && obj->config().zaa_enabled;
+            if (need_contouring) {
+                obj->contour_z();
+            } else {
+                if (obj->set_started(posContouring))
+                    obj->set_done(posContouring);
+            }
+        }
+
         tbb::parallel_for(tbb::blocked_range<int>(0, int(m_objects.size())),
             [this, need_slicing_objects](const tbb::blocked_range<int>& range) {
                 for (int i = range.begin(); i < range.end(); i++) {
@@ -2237,6 +2250,8 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
                     obj->set_done(posInfill);
                 if (obj->set_started(posIroning))
                     obj->set_done(posIroning);
+                if (obj->set_started(posContouring))
+                    obj->set_done(posContouring);
                 if (obj->set_started(posSupportMaterial))
                     obj->set_done(posSupportMaterial);
                 if (obj->set_started(posDetectOverhangsForLift))
@@ -2437,6 +2452,17 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
         }
     }
 
+    // // Z-Contouring
+    // for (PrintObject *obj : m_objects) {
+    //     bool need_contouring = need_slicing_objects.count(obj) != 0 && obj->config().zaa_enabled;
+    //     if (need_contouring) {
+    //         // if (obj->set_started(posContouring))
+    //         //     obj->set_done(posContouring);
+    //         // return;
+    //         obj->contour_z();
+    //     }
+    // }
+
     // BBS
     bool has_adaptive_layer_height = false;
     for (PrintObject* obj : m_objects) {
@@ -2616,7 +2642,7 @@ void Print::_make_skirt()
                     flow.width(),
 				    (float)initial_layer_print_height  // this will be overridden at G-code export time
                 )));
-            eloop.paths.back().polyline = loop.split_at_first_point();
+            eloop.paths.back().polyline = Polyline3(loop.split_at_first_point());
             m_skirt.append(eloop);
             if (m_config.min_skirt_length.value > 0) {
                 // The skirt length is limited. Sum the total amount of filament length extruded, in mm.
@@ -2674,7 +2700,7 @@ void Print::_make_skirt()
                         flow.width(),
                         (float)initial_layer_print_height  // this will be overridden at G-code export time
                     )));
-                eloop.paths.back().polyline = loop.split_at_first_point();
+                eloop.paths.back().polyline = Polyline3(loop.split_at_first_point());
                 object->m_skirt.append(std::move(eloop));
                 if (m_config.min_skirt_length.value > 0) {
                     // The skirt length is limited. Sum the total amount of filament length extruded, in mm.
@@ -3803,7 +3829,7 @@ static void to_json(json& j, const Polyline& poly_line) {
 }
 
 static void to_json(json& j, const ExtrusionPath& extrusion_path) {
-    j[JSON_EXTRUSION_POLYLINE] = extrusion_path.polyline;
+    j[JSON_EXTRUSION_POLYLINE] = extrusion_path.polyline.to_polyline();
     j[JSON_EXTRUSION_MM3_PER_MM] = extrusion_path.mm3_per_mm;
     j[JSON_EXTRUSION_WIDTH] = extrusion_path.width;
     j[JSON_EXTRUSION_HEIGHT] = extrusion_path.height;
@@ -4079,7 +4105,9 @@ static void from_json(const json& j, Polyline& poly_line) {
 }
 
 static void from_json(const json& j, ExtrusionPath& extrusion_path) {
-    extrusion_path.polyline               =    j[JSON_EXTRUSION_POLYLINE];
+    Polyline polyline;
+    from_json(j[JSON_EXTRUSION_POLYLINE], polyline);
+    extrusion_path.polyline               =    Polyline3(polyline);
     extrusion_path.mm3_per_mm             =    j[JSON_EXTRUSION_MM3_PER_MM];
     extrusion_path.width                  =    j[JSON_EXTRUSION_WIDTH];
     extrusion_path.height                 =    j[JSON_EXTRUSION_HEIGHT];
@@ -4913,8 +4941,8 @@ ExtrusionLayers FakeWipeTower::getTrueExtrusionLayersFromWipeTower() const
         paths.reserve(it->second.size());
         for (auto &polyline : it->second) {
             ExtrusionPath path(ExtrusionRole::erWipeTower, 0.0, 0.0, layer_heights[index]);
-            path.polyline = polyline;
-            for (auto &p : path.polyline.points) p += trans;
+            path.polyline = Polyline3(polyline);
+            for (auto &p : path.polyline.points) p += Point3(trans, 0);
             paths.push_back(path);
         }
         el.paths    = std::move(paths);
